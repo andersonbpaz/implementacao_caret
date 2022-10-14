@@ -1,0 +1,64 @@
+# carrega as bibliotecas
+pacman::p_load(ade4, arules, car, caret, corrplot, data.table, dplyr, e1071, forcats, funModeling, ggplot2, mlbench, mltools, randomForest, rattle, tidyverse)
+
+# empenhos contratos covid19 
+empenhos_covid19 <- fread('https://dados.sc.gov.br/dataset/4b3d481c-0f57-4443-8e95-a13a49746c0d/resource/aa687a73-92fc-4d49-926a-c3f83f3aed85/download/empenhos_contratos.csv')
+
+# Dummies
+empenhos_covid19_D <- acm.disjonctif(as.data.frame(empenhos_covid19$DETIPOCONTRATO))
+names(empenhos_covid19_D) <- c("Outros, "Aquisição", Serviços")
+
+empenhos_covid19 <- cbind(empenhos_covid19, empenhos_covid19_D)
+
+# Discretização
+empenhos_covid19$NUPRAZO <- discretize(empenhos_covid19$NUPRAZO, method = "frequency", breaks = 2, labels = c("baixa", "alta"))
+
+# Treino e Teste: Pré-processamento
+particao_empenhos_covid19 = createDataPartition(empenhos_covid19$NUPRAZO, p=.7, list = F) 
+treino_empenhos_covid19 = empenhos_covid19[particao_empenhos_covid19, ] 
+teste_empenhos_covid19 = empenhos_covid19[-particao_empenhos_covid19, ] 
+
+# Controle de treinamento
+train.control <- trainControl(method = "cv", number = 10, verboseIter = T) 
+
+## Máquina de Vetor se Suporte (SVM)
+empenhos_covid19_SVM <- train(NUPRAZO ~ "Outros" + "Aquisição" + "Serviços" + TDI_03 + MHA_03, data = treino_empenhos_covid19, method = "svmLinear", trControl = train.control)
+
+# máquina de vetor de suporte
+empenhos_covid19_SVM 
+plot(varImp(empenhos_covid19_SVM))
+
+# máquina de vetor de suporte
+svm_empenhos_covid19 = svm(NUPRAZO ~ Outros + Aquisição + Serviços + TDI_03 + MHA_03, data = treino_empenhos_covid19, cost = 10, scale = F)
+svm_empenhos_covid19
+plot(svm_empenhos_covid19, treino_empenhos_covid19, TDI_03 ~ MHA_03)
+
+## Árvore de Decisão
+RPART_empenhos_covid19 <- train(NUPRAZO ~ Outros + Aquisição + Serviços + TDI_03 + MHA_03, data = treino_empenhos_covid19, method = "rpart", trControl = train.control)
+
+summary(RPART_empenhos_covid19)
+fancyRpartPlot(empenhos_covid19_RPART_CLASS$finalModel) 
+plot(varImp(empenhos_covid19_RPART_CLASS)) 
+
+# Bagging com Floresta Aleatória
+empenhos_covid19_RF_CLASS <- train(NUPRAZO ~ Outros + Aquisição + Serviços + TDI_03 + MHA_03, data = treino_empenhos_covid19, method = "cforest", trControl = train.control)
+
+plot(empenhos_covid19_RF_CLASS) 
+plot(varImp(empenhos_covid19_RF_CLASS)) 
+
+# Boosting com Boosted 
+empenhos_covid19_ADA_CLASS <- train(NUPRAZO ~ Outros + Aquisição + Serviços + TDI_03 + MHA_03, data = treino_empenhos_covid19, method = "glmboost", trControl = train.control)
+
+plot(empenhos_covid19_ADA_CLASS) 
+print(empenhos_covid19_ADA_CLASS) 
+summary(empenhos_covid19_ADA_CLASS) 
+
+melhor_modelo <- resamples(list(SVM = empenhos_covid19_SVM, RPART = ENEM_RPART_CLASS, RF = ENEM_RF_CLASS, ADABOOST = ENEM_ADA_CLASS))
+melhor_modelo
+
+summary(melhor_modelo)
+
+predVals <- extractPrediction(list(SVM = ENEM_SVM_CLASS, RPART = RPART_empenhos_covid19, RF = empenhos_covid19_RF_CLASS, ADABOOST = empenhos_covid19_ADA_CLASS), testX = testeENEM[, c(8, 12:17)], testY = teste_empenhos_covid19$NUPRAZO) 
+
+plotObsVsPred(predVals)
+
